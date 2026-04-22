@@ -87,7 +87,8 @@ fileprivate struct BuildServiceTests: CoreBasedTests {
         .init(triple: "x86_64-unknown-windows-msvc", platformName: "windows", sdkVariant: nil, deploymentTargetSettingName: nil, deploymentTarget: nil),
 
         // WebAssembly
-        .init(triple: "wasm32-unknown-wasi", platformName: "webassembly", sdkVariant: nil, deploymentTargetSettingName: nil, deploymentTarget: nil),
+        .init(triple: "wasm32-unknown-wasi", platformName: "wasi", sdkVariant: nil, deploymentTargetSettingName: nil, deploymentTarget: nil),
+        .init(triple: "wasm32-unknown-emscripten", platformName: "emscripten", sdkVariant: nil, deploymentTargetSettingName: nil, deploymentTarget: nil),
 
         // Bare metal
         .init(triple: "aarch64-none-none-elf", platformName: "none", sdkVariant: nil, deploymentTargetSettingName: nil, deploymentTarget: nil),
