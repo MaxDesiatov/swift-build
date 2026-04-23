@@ -300,4 +300,114 @@ fileprivate struct SWBWebAssemblyPlatformTests: CoreBasedTests {
             }
         }
     }
+
+    /// Smoke test: ensures wasm test compiles emit a `-plugin-path` for swift-testing
+    /// macros, derived from the toolchain that holds the active swiftc (`SWIFT_EXEC`).
+    ///
+    /// `WebAssemblySettingsBuilderExtension.getTargetTestingSwiftPluginFlags` overrides
+    /// the universal `Settings.getTargetTestingSwiftPluginFlags` so the plugin path is
+    /// derived from `SWIFT_TOOLS_DIR`/`SWIFT_EXEC` rather than `TOOLCHAIN_DIR`. This
+    /// matters under SwiftPM-driven cross-compiles to wasm where `TOOLCHAIN_DIR`
+    /// resolves to XcodeDefault.xctoolchain even when `SWIFT_EXEC` points at a
+    /// development snapshot — the XcodeDefault `libTestingMacros.dylib` then expands
+    /// `@Test` against the wasm SDK's newer `Testing.swiftmodule`, producing
+    /// "extra argument 'sourceLocation'" errors.
+    ///
+    /// Limitation: in this test environment `swiftCompilerPath` and `TOOLCHAIN_DIR`
+    /// happen to point at the same toolchain (XcodeDefault), so this test passes whether
+    /// or not the extension is installed. The actual XcodeDefault-vs-active-toolchain
+    /// divergence is exercised by JavaScriptKit's `js test` end-to-end run; this test
+    /// catches regressions where the wasm-domain plugin-path stops being derived from
+    /// the toolchain that holds swiftc.
+    @Test(.requireSDKs(.host))
+    func wasmTestingPluginPathDerivedFromSwiftExec() async throws {
+        try await withTemporaryDirectory { (tmpDir: Path) in
+            let swiftCompilerPath = try await self.swiftCompilerPath
+            let swiftVersion = try await self.swiftVersion
+            let testProject = TestProject(
+                "aProject",
+                groupTree: TestGroup(
+                    "SomeFiles", path: "Sources",
+                    children: [TestFile("MyTest.swift")]),
+                targets: [
+                    TestStandardTarget(
+                        "MyTests",
+                        type: .unitTest,
+                        buildConfigurations: [
+                            TestBuildConfiguration("Debug",
+                                                   buildSettings: [
+                                                    "GENERATE_INFOPLIST_FILE": "YES",
+                                                    "PRODUCT_NAME": "$(TARGET_NAME)",
+                                                    "SDKROOT": "auto",
+                                                    "SUPPORTED_PLATFORMS": "$(AVAILABLE_PLATFORMS)",
+                                                    "SWIFT_EXEC": swiftCompilerPath.str,
+                                                    "SWIFT_VERSION": swiftVersion,
+                                                    "ENABLE_TESTING_SEARCH_PATHS": "YES",
+                                                   ]),
+                        ],
+                        buildPhases: [
+                            TestSourcesBuildPhase([TestBuildFile("MyTest.swift")]),
+                        ]),
+                ])
+            // Use a dedicated core for this test so the SDKs it registers do not impact other tests
+            let core = try await Self.makeCore()
+            let tester = try TaskConstructionTester(core, testProject)
+
+            let sdkManifestContents = """
+            {
+                "schemaVersion" : "4.0",
+                "targetTriples" : {
+                    "wasm32-unknown-wasip1" : {
+                        "sdkRootPath" : "WASI.sdk",
+                        "swiftResourcesPath" : "swift.xctoolchain/usr/lib/swift_static",
+                        "swiftStaticResourcesPath" : "swift.xctoolchain/usr/lib/swift_static",
+                        "toolsetPaths" : [ "toolset.json" ]
+                    }
+                }
+            }
+            """
+            let sdkManifestDir = tmpDir
+            try localFS.createDirectory(sdkManifestDir)
+            let sdkManifestPath = sdkManifestDir.join("swift-sdk.json")
+            try await localFS.writeFileContents(sdkManifestPath, waitForNewTimestamp: false, body: { $0.write(sdkManifestContents) })
+            try await localFS.writeFileContents(sdkManifestDir.join("toolset.json"), waitForNewTimestamp: false, body: { stream in
+                stream.write("""
+                {
+                    "rootPath" : "swift.xctoolchain/usr/bin",
+                    "schemaVersion" : "1.0",
+                    "swiftCompiler" : { "extraCLIOptions" : [ "-static-stdlib" ] }
+                }
+                """)
+            })
+
+            let destination = try RunDestinationInfo(sdkManifestPath: sdkManifestPath, triple: "wasm32-unknown-wasip1", targetArchitecture: "wasm32", supportedArchitectures: ["wasm32"], disableOnlyActiveArch: false, core: core)
+            let parameters = BuildParameters(configuration: "Debug", activeRunDestination: destination)
+
+            await tester.checkBuild(parameters, runDestination: nil, fs: localFS) { results in
+                results.checkTask(.matchTargetName("MyTests"), .matchRuleType("SwiftDriver Compilation")) { task in
+                    // The extension derives the testing-plugin path from the toolchain that holds
+                    // the active swiftc (`SWIFT_EXEC`), not from `TOOLCHAIN_DIR`. Verify the emitted
+                    // `-plugin-path` matches `<toolchain>/usr/lib/swift/host/plugins/testing` where
+                    // `<toolchain>` is `SWIFT_EXEC`'s enclosing `<usr-parent>` (i.e. the parent of
+                    // the `usr/bin` that contains swiftc).
+                    let expectedPluginPath = swiftCompilerPath.dirname.dirname.join("lib/swift/host/plugins/testing").str
+
+                    let words = Array(task.commandLineAsStrings)
+                    var pluginPathArgs: [String] = []
+                    for idx in words.indices where words[idx] == "-plugin-path" {
+                        let next = idx + 1
+                        if next < words.count {
+                            pluginPathArgs.append(words[next])
+                        }
+                    }
+                    #expect(
+                        pluginPathArgs.contains(expectedPluginPath),
+                        "Expected -plugin-path \(expectedPluginPath); got pluginPaths=\(pluginPathArgs)"
+                    )
+                }
+
+                results.checkNoErrors()
+            }
+        }
+    }
 }

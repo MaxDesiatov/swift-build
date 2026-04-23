@@ -30,8 +30,11 @@
                         CommandLineFlag = "";
                     },
                     {
+                        // For wasm targets the linker driver is swiftc, which
+                        // produces a shared library via `-emit-library`. Avoid
+                        // passing `-shared` because swiftc rejects it.
                         Value = "mh_dylib";
-                        CommandLineFlag = "-shared";
+                        CommandLineFlag = "";
                     },
                     {
                         Value = "mh_object";

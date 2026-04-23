@@ -55,4 +55,29 @@
             EXECUTABLE_EXTENSION = "wasm";
         };
     },
+    {
+        // Wasm doesn't support dynamic libraries. Inheriting the unit-test
+        // product type from generic-unix (library.dynamic) causes
+        // `swiftc -emit-library` to fail with "dynamic libraries are
+        // unsupported for target 'wasm32-unknown-wasip1'". Rebase on
+        // library.static so the test bundle becomes a static archive that
+        // the swiftpm-test-runner executable statically links into a single
+        // .wasm executable. Per-domain inheritance replaces the parent
+        // entry rather than merging — restate the test-discovery /
+        // testability / index-store / test-anchor properties from
+        // generic-unix's unit-test entry (Unix.xcspec:32-42), and add
+        // ENABLE_TESTING_SEARCH_PATHS to match Windows's analogous override
+        // (Windows.xcspec:48-58).
+        Domain = webassembly;
+        Type = ProductType;
+        Identifier = com.apple.product-type.bundle.unit-test;
+        BasedOn = default:com.apple.product-type.library.static;
+        DefaultBuildProperties = {
+            ENABLE_TESTING_SEARCH_PATHS = YES;
+            COMPILER_INDEX_STORE_ENABLE = YES;
+            SWIFT_INDEX_STORE_ENABLE = YES;
+            SWIFT_ENABLE_TESTABILITY = YES;
+            GENERATE_TEST_ANCHOR = YES;
+        };
+    },
 )
