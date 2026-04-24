@@ -13,7 +13,6 @@
 public import SWBUtil
 import SWBCore
 import SWBMacro
-import SWBProtocol
 import Foundation
 
 public let initializePlugin: PluginInitializationFunction = { manager in
@@ -76,53 +75,33 @@ struct WebAssemblySettingsBuilderExtension: SettingsBuilderExtension {
         _ scope: MacroEvaluationScope,
         toolchainRegistry: ToolchainRegistry,
         sdkRegistry: SDKRegistry,
-        activeRunDestination: SWBProtocol.RunDestinationInfo?,
+        activeRunDestination: SWBCore.RunDestinationInfo?,
         project: SWBCore.Project?
     ) -> [String] {
-        let platformName = scope.evaluate(BuiltinMacros.PLATFORM_NAME)
-        let swiftExec = scope.evaluate(BuiltinMacros.SWIFT_EXEC)
-        let swiftToolsDir = scope.evaluate(BuiltinMacros.SWIFT_TOOLS_DIR)
-        fputs("DEBUG WebAssemblySettingsBuilderExtension: PLATFORM_NAME=\(platformName) SWIFT_EXEC=\(swiftExec.str) SWIFT_TOOLS_DIR=\(swiftToolsDir)\n", stderr)
-        guard platformName == "webassembly" else {
-            fputs("DEBUG   -> skipped: platform not webassembly\n", stderr)
-            return []
-        }
+        guard scope.evaluate(BuiltinMacros.PLATFORM_NAME) == "webassembly" else { return [] }
 
         let swiftBinDir: Path
+        let swiftToolsDir = scope.evaluate(BuiltinMacros.SWIFT_TOOLS_DIR)
         if !swiftToolsDir.isEmpty {
             let toolsPath = Path(swiftToolsDir)
-            guard toolsPath.isAbsolute else {
-                fputs("DEBUG   -> skipped: swiftToolsDir not absolute\n", stderr)
-                return []
-            }
+            guard toolsPath.isAbsolute else { return [] }
             swiftBinDir = toolsPath
         } else {
-            guard !swiftExec.isEmpty, swiftExec.isAbsolute else {
-                fputs("DEBUG   -> skipped: swiftExec empty or not absolute\n", stderr)
-                return []
-            }
+            let swiftExec = scope.evaluate(BuiltinMacros.SWIFT_EXEC)
+            guard !swiftExec.isEmpty, swiftExec.isAbsolute else { return [] }
             swiftBinDir = swiftExec.dirname
         }
 
-        guard swiftBinDir.basename == "bin" else {
-            fputs("DEBUG   -> skipped: swiftBinDir basename != 'bin' (=\(swiftBinDir.str))\n", stderr)
-            return []
-        }
+        guard swiftBinDir.basename == "bin" else { return [] }
         let usrDir = swiftBinDir.dirname
-        guard usrDir.basename == "usr" else {
-            fputs("DEBUG   -> skipped: usrDir basename != 'usr' (=\(usrDir.str))\n", stderr)
-            return []
-        }
-        let toolchainRoot = usrDir.dirname
-
-        guard toolchainRegistry.toolchains.contains(where: { $0.path == toolchainRoot }) else {
-            let registryPaths = toolchainRegistry.toolchains.map { $0.path.str }.sorted().joined(separator: ", ")
-            fputs("DEBUG   -> skipped: toolchainRoot \(toolchainRoot.str) not in registry; registry contains [\(registryPaths)]\n", stderr)
-            return []
-        }
+        guard usrDir.basename == "usr" else { return [] }
 
         let pluginPath = usrDir.join("lib/swift/host/plugins/testing")
-        fputs("DEBUG   -> emitting -plugin-path \(pluginPath.str)\n", stderr)
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: pluginPath.str, isDirectory: &isDir), isDir.boolValue else {
+            return []
+        }
+
         return ["-plugin-path", pluginPath.str]
     }
 }
