@@ -29,6 +29,13 @@
         Identifier = org.swift.product-type.common.object;
         BasedOn = com.apple.product-type.library.static;
     },
+    // Subspecs under `Domain = webassembly` MUST declare qualified
+    // `BasedOn = webassembly:...` references. `BasedOn` is resolved
+    // from the requesting domain's perspective, so an unqualified
+    // `BasedOn = com.apple.product-type.tool` in a `webassembly`
+    // subspec can be silently shadowed when a descendant subdomain
+    // (wasi, emscripten) registers an override with the same
+    // identifier.
     {
         Domain = webassembly;
         Type = ProductType;
@@ -43,7 +50,7 @@
         Domain = webassembly;
         Type = ProductType;
         Identifier = com.apple.product-type.tool.host-build;
-        BasedOn = com.apple.product-type.tool;
+        BasedOn = webassembly:com.apple.product-type.tool;
     },
     {
         Domain = webassembly;
@@ -68,6 +75,24 @@
         DefaultBuildProperties = {
             EXECUTABLE_SUFFIX = ".$(EXECUTABLE_EXTENSION)";
             EXECUTABLE_EXTENSION = "wasm";
+        };
+    },
+    {
+        Domain = emscripten;
+        Type = ProductType;
+        Identifier = com.apple.product-type.tool;
+        BasedOn = webassembly:com.apple.product-type.tool;
+        DefaultBuildProperties = {
+            EXECUTABLE_EXTENSION = "js";
+        };
+    },
+    {
+        Domain = emscripten;
+        Type = ProductType;
+        Identifier = com.apple.product-type.tool.swiftpm-test-runner;
+        BasedOn = webassembly:com.apple.product-type.tool.swiftpm-test-runner;
+        DefaultBuildProperties = {
+            EXECUTABLE_EXTENSION = "js";
         };
     },
 )

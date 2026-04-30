@@ -11,8 +11,27 @@
 //===----------------------------------------------------------------------===//
 
 import Foundation
-package import SWBCore
+// `@_spi(Testing)` is required by `ProductTypeSpec.buildSettings` (used by
+// the `evaluateStringMacro` helper below). Swift has no per-declaration
+// SPI import, so this file consumes SWBCore's `Testing` SPI at file
+// scope. The exposure is confined to this file — `evaluateStringMacro`
+// returns `String`, so no SPI types leak into SWBTestSupport's package
+// interface. Drop the `@_spi(Testing)` qualifier if/when
+// `ProductTypeSpec.buildSettings` is promoted out of SPI.
+@_spi(Testing) package import SWBCore
+package import SWBMacro
 package import SWBUtil
+
+extension ProductTypeSpec {
+    /// Evaluate a string-typed build setting declared in this product
+    /// type's `DefaultBuildProperties`. Used by spec tests to assert
+    /// macro values without reassembling `MacroEvaluationScope` plumbing
+    /// at every call site.
+    package func evaluateStringMacro(_ name: String) throws -> String {
+        let macro = try buildSettings.namespace.declareStringMacro(name)
+        return MacroEvaluationScope(table: buildSettings).evaluate(macro)
+    }
+}
 
 package class CapturingTaskParserDelegate: TaskOutputParserDelegate {
     package let buildOperationIdentifier: BuildSystemOperationIdentifier = .init(UUID())

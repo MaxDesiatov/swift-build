@@ -148,4 +148,91 @@ fileprivate struct SWBWebAssemblyPlatformTests: CoreBasedTests {
             }
         }
     }
+
+    /// End-to-end coverage that the emscripten-domain
+    /// `EXECUTABLE_EXTENSION = "js"` override reaches the `Ld` task's
+    /// output path. `WebAssemblyExecutableExtensionTests` probes the
+    /// macro in isolation; this test verifies the value actually flows
+    /// through `EXECUTABLE_SUFFIX` → `FULL_PRODUCT_NAME` and produces
+    /// a `.js`-suffixed product path when a Swift SDK targeting
+    /// `wasm32-unknown-emscripten` is active.
+    @Test(.requireSDKs(.host))
+    func emscriptenSwiftSDKProducesJsLinkerOutput() async throws {
+        try await withTemporaryDirectory { tmpDir in
+            let clangCompilerPath = try await self.clangCompilerPath
+            let swiftCompilerPath = try await self.swiftCompilerPath
+            let swiftVersion = try await self.swiftVersion
+            let testProject = try await TestProject(
+                "aProject",
+                groupTree: TestGroup(
+                    "SomeFiles", path: "Sources",
+                    children: [
+                        TestFile("main.swift"),
+                    ]),
+                targets: [
+                    TestStandardTarget(
+                        "MyTool",
+                        type: .commandLineTool,
+                        buildConfigurations: [
+                            TestBuildConfiguration("Debug",
+                                                   buildSettings: [
+                                                    "PRODUCT_NAME": "$(TARGET_NAME)",
+                                                    "SDKROOT": "auto",
+                                                    "SUPPORTED_PLATFORMS": "$(AVAILABLE_PLATFORMS)",
+                                                    "SWIFT_EXEC": swiftCompilerPath.str,
+                                                    "SWIFT_VERSION": swiftVersion,
+                                                    "CC": clangCompilerPath.str,
+                                                    "CLANG_EXPLICIT_MODULES_LIBCLANG_PATH": libClangPath.str,
+                                                    "CLANG_USE_RESPONSE_FILE": "NO",
+                                                   ]),
+                        ],
+                        buildPhases: [
+                            TestSourcesBuildPhase([
+                                TestBuildFile("main.swift"),
+                            ]),
+                        ]),
+                ])
+            let core = try await Self.makeCore()
+            let tester = try TaskConstructionTester(core, testProject)
+
+            let sdkManifestContents = """
+            {
+                "schemaVersion" : "4.0",
+                "targetTriples" : {
+                    "wasm32-unknown-emscripten" : {
+                        "sdkRootPath" : "Emscripten.sdk",
+                        "swiftResourcesPath" : "swift.xctoolchain/usr/lib/swift_static",
+                        "swiftStaticResourcesPath" : "swift.xctoolchain/usr/lib/swift_static",
+                        "toolsetPaths" : [
+                            "toolset.json"
+                        ]
+                    }
+                }
+            }
+            """
+            let sdkManifestDir = tmpDir
+            try localFS.createDirectory(sdkManifestDir)
+            let sdkManifestPath = sdkManifestDir.join("swift-sdk.json")
+            try await localFS.writeFileContents(sdkManifestPath, waitForNewTimestamp: false, body: { $0.write(sdkManifestContents) })
+            try await localFS.writeFileContents(sdkManifestDir.join("toolset.json"), waitForNewTimestamp: false, body: { stream in
+                stream.write("""
+                {
+                    "rootPath" : "swift.xctoolchain/usr/bin",
+                    "schemaVersion" : "1.0"
+                }
+                """)
+            })
+
+            let destination = try RunDestinationInfo(sdkManifestPath: sdkManifestPath, triple: "wasm32-unknown-emscripten", targetArchitecture: "wasm32", supportedArchitectures: ["wasm32"], disableOnlyActiveArch: false, core: core)
+            let parameters = BuildParameters(configuration: "Debug", activeRunDestination: destination)
+            // `activeRunDestination` on `parameters` drives the build target;
+            // `checkBuild`'s `runDestination:` is intentionally `nil`.
+            await tester.checkBuild(parameters, runDestination: nil, fs: localFS) { results in
+                results.checkTask(.matchTargetName("MyTool"), .matchRuleType("Ld"), .matchRuleItemPattern(.suffix("build/Debug-emscripten/MyTool.js"))) { _ in
+                    // Presence of this task proves EXECUTABLE_EXTENSION = "js"
+                    // cascaded into the linker output path.
+                }
+            }
+        }
+    }
 }
